@@ -1,0 +1,1046 @@
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+
+const AdminDashboard = ({ user: propUser }) => {
+  // Get user from props or localStorage with more robust handling
+  const [user, setUser] = useState(() => {
+    // First try props
+    if (propUser && propUser.token) {
+      console.log('Using user from props:', propUser);
+      return propUser;
+    }
+    
+    // Then try localStorage
+    try {
+      const storedUser = JSON.parse(localStorage.getItem('user'));
+      if (storedUser && storedUser.token) {
+        console.log('Using user from localStorage:', storedUser);
+        return storedUser;
+      }
+      
+      console.error('No valid user in props or localStorage');
+      return null;
+    } catch (err) {
+      console.error('Error parsing user from localStorage:', err);
+      return null;
+    }
+  });
+  
+  const [activeTab, setActiveTab] = useState('grievances');
+  const [grievances, setGrievances] = useState([]);
+  const [workerLocations, setWorkerLocations] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [selectedImage, setSelectedImage] = useState(null);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    // Check if we have a valid user with token
+    if (!user || !user.token) {
+      console.error('No valid user with token found');
+      setError('Authentication error. Please login again.');
+      
+      // Try to get user again from localStorage before redirecting
+      try {
+        const storedUser = JSON.parse(localStorage.getItem('user'));
+        if (storedUser && storedUser.token) {
+          console.log('Recovered user from localStorage:', storedUser);
+          setUser(storedUser);
+          return; // Don't navigate away if we found a valid user
+        }
+      } catch (err) {
+        console.error('Failed to recover user from localStorage:', err);
+      }
+      
+      navigate('/login');
+      return;
+    }
+    
+    // Load data based on active tab
+    if (activeTab === 'grievances') {
+      fetchGrievances();
+    } else if (activeTab === 'locations') {
+      fetchAllWorkerLocations();
+    }
+  }, [activeTab, user]);
+
+  const fetchGrievances = async () => {
+    setLoading(true);
+    try {
+      // Check if user token exists
+      if (!user || !user.token) {
+        console.error('No auth token available');
+        setError('Authentication error. Please login again.');
+        localStorage.removeItem('user'); // Clear invalid session
+        navigate('/login');
+        return;
+      }
+      
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/grievances/admin`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${user.token}`
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        
+        // Format the data to match our component's structure
+        const formattedGrievances = data.grievances.map(g => ({
+          id: g.grievance_id,
+          title: g.description.substring(0, 30) + (g.description.length > 30 ? '...' : ''),
+          category: g.category || 'General',
+          status: g.status,
+          dateSubmitted: new Date(g.created_at).toISOString().split('T')[0],
+          latitude: g.latitude,
+          longitude: g.longitude,
+          priority: g.priority || 'medium', // Default to medium if not specified
+          citizenName: g.citizen ? g.citizen.full_name : 'Unknown',
+          image_path: g.image_path
+        }));
+        
+        setGrievances(formattedGrievances);
+      } else {
+        const errorText = await response.text();
+        console.error('Failed to fetch grievances:', errorText);
+        
+        // Handle unauthorized error
+        if (response.status === 401 || response.status === 403) {
+          setError('Authentication error. Please login again.');
+          localStorage.removeItem('user'); // Clear invalid session
+          navigate('/login');
+          return;
+        }
+        
+        setError('Failed to load grievances. Please try again.');
+      }
+    } catch (err) {
+      console.error('Error fetching grievances:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchAllWorkerLocations = async () => {
+    setLoading(true);
+    setError('');
+    
+    try {
+      const timestamp = new Date().getTime();
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/admin/worker-locations?t=${timestamp}`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${user.token}`,
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setWorkerLocations(data.locations);
+      } else {
+        const errorText = await response.text();
+        console.error('Failed to fetch worker locations:', errorText);
+        setError('Failed to load worker locations.');
+      }
+    } catch (err) {
+      console.error('Error fetching worker locations:', err);
+      setError('An error occurred while fetching worker locations.');
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  const handleLogout = () => {
+    localStorage.removeItem('user');
+    navigate('/login');
+  };
+  
+  const handleImageClick = (imageSrc) => {
+    setSelectedImage(imageSrc);
+  };
+  
+  const getStatusBadge = (status) => {
+    const statusStyles = {
+      'pending': { bg: '#fff3cd', color: '#856404' },
+      'working': { bg: '#d1ecf1', color: '#0c5460' },
+      'completed': { bg: '#d4edda', color: '#155724' },
+      'resolved': { bg: '#d4edda', color: '#155724' },
+      'rejected': { bg: '#f8d7da', color: '#721c24' }
+    };
+    
+    const style = statusStyles[status] || statusStyles.pending;
+    
+    return (
+      <span style={{
+        backgroundColor: style.bg,
+        color: style.color,
+        padding: '4px 8px',
+        borderRadius: '12px',
+        fontSize: '12px',
+        fontWeight: '600',
+        textTransform: 'uppercase'
+      }}>
+        {status}
+      </span>
+    );
+  };
+  
+  const getPriorityBadge = (priority) => {
+    const priorityStyles = {
+      'low': { bg: '#e8eaf6', color: '#3949ab' },
+      'medium': { bg: '#fff3e0', color: '#e65100' },
+      'high': { bg: '#ffebee', color: '#b71c1c' }
+    };
+    
+    const style = priorityStyles[priority] || priorityStyles.medium;
+    
+    return (
+      <span style={{
+        backgroundColor: style.bg,
+        color: style.color,
+        padding: '4px 8px',
+        borderRadius: '12px',
+        fontSize: '12px',
+        fontWeight: '600',
+        textTransform: 'uppercase'
+      }}>
+        {priority}
+      </span>
+    );
+  };
+
+  const [selectedGrievance, setSelectedGrievance] = useState(null);
+  const [availableWorkers, setAvailableWorkers] = useState([]);
+  const [assignModalOpen, setAssignModalOpen] = useState(false);
+  const [assignLoading, setAssignLoading] = useState(false);
+
+  // Helper function to make the actual assignment API call
+  const assignGrievanceToWorker = async (grievanceId, workerId, token) => {
+    if (!token) {
+      throw new Error('No authentication token provided to assignGrievanceToWorker');
+    }
+    
+    console.log('Using token for request:', token);
+    
+    const response = await fetch(`${import.meta.env.VITE_API_URL}/grievances/assign`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        grievanceId: parseInt(grievanceId), // Ensure it's a number
+        workerId: parseInt(workerId) // Ensure it's a number
+      })
+    });
+    
+    const responseData = await response.json();
+      
+    if (response.ok) {
+      // Show success message
+      alert('Task successfully assigned to worker!');
+      
+      // Refresh grievances list
+      fetchGrievances();
+      setAssignModalOpen(false);
+      setSelectedGrievance(null);
+    } else {
+      console.error('Assignment failed:', responseData);
+      setError(responseData.error || responseData.details || 'Failed to assign task.');
+    }
+    
+    return { response, responseData };
+  };
+
+  const handleAssignTask = async (grievanceId) => {
+    try {
+      setSelectedGrievance(grievanceId);
+      setAssignLoading(true);
+      
+      // Find the grievance to get its coordinates
+      const selectedGrievanceObj = grievances.find(g => g.id === grievanceId || g.grievance_id === grievanceId);
+      if (!selectedGrievanceObj) {
+        throw new Error('Grievance not found');
+      }
+      
+      // Verify we have a valid token first
+      if (!user || !user.token) {
+        console.error('No auth token available for fetching workers');
+        
+        // Try to get fresh token from localStorage
+        try {
+          const storedUser = JSON.parse(localStorage.getItem('user'));
+          if (storedUser && storedUser.token) {
+            console.log('Recovered user from localStorage for worker fetch:', storedUser);
+            setUser(storedUser);
+            // Continue with the stored user
+          } else {
+            setError('Authentication error. Please login again.');
+            setTimeout(() => navigate('/login'), 2000);
+            return;
+          }
+        } catch (err) {
+          console.error('Failed to recover user from localStorage:', err);
+          setError('Authentication error. Please login again.');
+          setTimeout(() => navigate('/login'), 2000);
+          return;
+        }
+      }
+      
+      const token = user?.token || JSON.parse(localStorage.getItem('user'))?.token;
+      
+      if (!token) {
+        setError('Authentication error. Please login again.');
+        setTimeout(() => navigate('/login'), 2000);
+        return;
+      }
+      
+      // Fetch available workers for this grievance with coordinates for proximity sorting
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL}/workers/available?latitude=${selectedGrievanceObj.latitude}&longitude=${selectedGrievanceObj.longitude}`, 
+        {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        }
+      );
+      
+      if (response.ok) {
+        const data = await response.json();
+        setAvailableWorkers(data.workers || []);
+        setAssignModalOpen(true);
+      } else {
+        console.error('Failed to fetch available workers:', await response.text());
+        setError('Failed to fetch available workers. Please try again.');
+      }
+    } catch (err) {
+      console.error('Error preparing assignment:', err);
+      setError('An error occurred while preparing the assignment.');
+    } finally {
+      setAssignLoading(false);
+    }
+  };
+
+  const handleAssignWorker = async (workerId) => {
+    if (!selectedGrievance || !workerId) return;
+    
+    try {
+      setAssignLoading(true);
+      
+      // Debug the user and token
+      console.log('User object:', user);
+      console.log('User token:', user?.token);
+      
+      // Verify we have a valid token
+      if (!user || !user.token) {
+        console.error('No auth token available');
+        
+        // Try to get fresh token from localStorage
+        try {
+          const storedUser = JSON.parse(localStorage.getItem('user'));
+          if (storedUser && storedUser.token) {
+            console.log('Recovered user from localStorage for assignment:', storedUser);
+            setUser(storedUser);
+            // Continue with the assignment using the recovered token
+            await assignGrievanceToWorker(selectedGrievance, workerId, storedUser.token);
+            return;
+          }
+        } catch (err) {
+          console.error('Failed to recover user from localStorage:', err);
+        }
+        
+        setError('Authentication error. Please login again.');
+        setTimeout(() => navigate('/login'), 2000); // Redirect after showing error
+        return;
+      }
+      
+      // Debug the value types
+      console.log('Assigning grievance to worker:', { 
+        grievanceId: selectedGrievance,
+        grievanceIdType: typeof selectedGrievance,
+        workerId: workerId,
+        workerIdType: typeof workerId
+      });
+      
+      await assignGrievanceToWorker(selectedGrievance, workerId, user.token);
+    } catch (err) {
+      console.error('Error assigning task:', err);
+      setError('An error occurred while assigning the task.');
+    } finally {
+      setAssignLoading(false);
+    }
+  };
+
+  const [mapModalOpen, setMapModalOpen] = useState(false);
+  return (
+    <div style={{ 
+      minHeight: '100vh',
+      backgroundColor: '#f5f5f5',
+      fontFamily: 'Poppins, sans-serif',
+      display: 'flex',
+      flexDirection: 'column'
+    }}>
+      {/* Header */}
+      <header style={{ 
+        backgroundColor: '#fdb813',
+        padding: '15px 20px',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        boxShadow: '0 2px 10px rgba(0, 0, 0, 0.1)'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          <h1 style={{ 
+            margin: 0, 
+            color: '#333',
+            fontSize: '24px'
+          }}>
+            Admin Dashboard
+          </h1>
+        </div>
+        
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          <div style={{ marginRight: '20px', textAlign: 'right' }}>
+            <p style={{ margin: '0', color: '#333', fontWeight: '600' }}>
+              {user.name}
+            </p>
+            <p style={{ margin: '0', color: '#555', fontSize: '14px' }}>
+              Municipal Admin
+            </p>
+          </div>
+          
+          <button 
+            onClick={handleLogout}
+            style={{
+              padding: '8px 15px',
+              backgroundColor: '#fff',
+              color: '#333',
+              border: 'none',
+              borderRadius: '20px',
+              cursor: 'pointer',
+              fontWeight: '600',
+              fontSize: '14px',
+              boxShadow: '0 2px 5px rgba(0,0,0,0.1)'
+            }}
+          >
+            Logout
+          </button>
+        </div>
+      </header>
+      
+      {/* Tabs */}
+      <div style={{ 
+        padding: '20px 20px 0',
+        maxWidth: '1200px',
+        margin: '0 auto',
+        width: '100%'
+      }}>
+        <div style={{
+          display: 'flex',
+          borderBottom: '1px solid #ddd'
+        }}>
+          <button
+            onClick={() => setActiveTab('grievances')}
+            style={{
+              padding: '12px 24px',
+              background: 'none',
+              border: 'none',
+              borderBottom: activeTab === 'grievances' ? '3px solid #4BB462' : 'none',
+              fontWeight: activeTab === 'grievances' ? '600' : '400',
+              color: activeTab === 'grievances' ? '#333' : '#777',
+              fontSize: '16px',
+              cursor: 'pointer',
+              transition: 'all 0.3s ease',
+              marginBottom: activeTab === 'grievances' ? '-1px' : '0'
+            }}
+          >
+            Grievances
+          </button>
+          
+          <button
+            onClick={() => setActiveTab('locations')}
+            style={{
+              padding: '12px 24px',
+              background: 'none',
+              border: 'none',
+              borderBottom: activeTab === 'locations' ? '3px solid #4BB462' : 'none',
+              fontWeight: activeTab === 'locations' ? '600' : '400',
+              color: activeTab === 'locations' ? '#333' : '#777',
+              fontSize: '16px',
+              cursor: 'pointer',
+              transition: 'all 0.3s ease',
+              marginBottom: activeTab === 'locations' ? '-1px' : '0'
+            }}
+          >
+            Worker Locations
+          </button>
+        </div>
+      </div>
+      
+      {/* Tab Content */}
+      <div style={{ 
+        padding: '20px',
+        maxWidth: '1200px',
+        margin: '0 auto',
+        width: '100%',
+        flex: 1
+      }}>
+        {error && (
+          <div style={{
+            backgroundColor: '#f8d7da',
+            color: '#721c24',
+            padding: '12px 20px',
+            borderRadius: '5px',
+            marginBottom: '20px',
+            fontSize: '14px'
+          }}>
+            {error}
+          </div>
+        )}
+        
+        {/* Grievances Tab Content */}
+        {activeTab === 'grievances' && (
+          <>
+            <div style={{ 
+              display: 'flex', 
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '20px'
+            }}>
+              <h2 style={{ margin: '0', color: '#333' }}>
+                All Grievances
+              </h2>
+              <button
+                onClick={fetchGrievances}
+                disabled={loading}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: '#4BB462',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '5px',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  fontWeight: '500'
+                }}
+              >
+                Refresh
+              </button>
+            </div>
+            
+            {loading ? (
+              <div style={{ textAlign: 'center', padding: '40px 0' }}>
+                <p>Loading grievances...</p>
+              </div>
+            ) : (
+              <>
+                {grievances.length === 0 ? (
+                  <div style={{
+                    padding: '60px 20px',
+                    textAlign: 'center',
+                    color: '#9e9e9e',
+                    fontSize: '16px',
+                    backgroundColor: 'white',
+                    borderRadius: '10px',
+                    boxShadow: '0 2px 10px rgba(0, 0, 0, 0.05)',
+                    border: '1px solid #e0e0e0'
+                  }}>
+                    No grievances found. Refresh to try again.
+                  </div>
+                ) : (
+                  <div style={{ 
+                    backgroundColor: 'white',
+                    borderRadius: '10px',
+                    overflow: 'auto',
+                    boxShadow: '0 2px 10px rgba(0, 0, 0, 0.05)',
+                    border: '1px solid #e0e0e0'
+                  }}>
+                    {/* Table Header */}
+                    <div style={{ 
+                      display: 'grid',
+                      gridTemplateColumns: '50px 80px 2fr 1fr 1fr 1fr 1fr 1.5fr 80px',
+                      padding: '15px 20px',
+                      backgroundColor: '#f8f9fa',
+                      borderBottom: '2px solid #dee2e6',
+                      fontWeight: '700',
+                      color: '#495057'
+                    }}>
+                      <div>ID</div>
+                      <div>Image</div>
+                      <div>Description</div>
+                      <div>Category</div>
+                      <div>Status</div>
+                      <div>Citizen</div>
+                      <div>Date</div>
+                      <div>Coordinates</div>
+                      <div>Action</div>
+                    </div>
+                    
+                    {/* Table Body */}
+                    {grievances.map((grievance) => (
+                      <div 
+                        key={grievance.id}
+                        style={{ 
+                          display: 'grid',
+                          gridTemplateColumns: '50px 80px 2fr 1fr 1fr 1fr 1fr 1.5fr 80px',
+                          padding: '15px 20px',
+                          borderBottom: '1px solid #eee',
+                          alignItems: 'center',
+                          transition: 'background-color 0.2s',
+                          color: '#333'
+                        }}
+                        onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f9f9f9'}
+                        onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                      >
+                        <div>{grievance.id}</div>
+                        <div>
+                          {grievance.image_path ? (
+                            <img 
+                              src={`${import.meta.env.VITE_API_URL.replace('/api', '')}${grievance.image_path}`}
+                              alt="Grievance"
+                              style={{
+                                width: '60px',
+                                height: '40px',
+                                objectFit: 'cover',
+                                borderRadius: '4px',
+                                border: '1px solid #ddd',
+                                cursor: 'pointer'
+                              }}
+                              onClick={() => handleImageClick(`${import.meta.env.VITE_API_URL.replace('/api', '')}${grievance.image_path}`)}
+                              onError={(e) => {
+                                e.target.style.display = 'none';
+                                e.target.nextSibling.style.display = 'block';
+                              }}
+                            />
+                          ) : null}
+                          <span style={{ display: 'none', fontSize: '12px', color: '#999' }}>No image</span>
+                        </div>
+                        <div style={{ fontWeight: '500' }}>{grievance.title}</div>
+                        <div>{grievance.category}</div>
+                        <div>{getStatusBadge(grievance.status)}</div>
+                        <div>{grievance.citizenName}</div>
+                        <div>{grievance.dateSubmitted}</div>
+                        <div>
+                          {grievance.latitude !== undefined && grievance.longitude !== undefined ? 
+                            `${typeof grievance.latitude === 'number' ? grievance.latitude.toFixed(6) : parseFloat(grievance.latitude).toFixed(6)}, 
+                             ${typeof grievance.longitude === 'number' ? grievance.longitude.toFixed(6) : parseFloat(grievance.longitude).toFixed(6)}` 
+                            : 'No coordinates'
+                          }
+                        </div>
+                        <div>
+                          {grievance.status === 'pending' && (
+                            <button
+                              onClick={() => handleAssignTask(grievance.id)}
+                              style={{
+                                padding: '6px 12px',
+                                backgroundColor: '#4BB462',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '5px',
+                                cursor: 'pointer',
+                                fontSize: '12px',
+                                fontWeight: '500'
+                              }}
+                            >
+                              Assign
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </>
+        )}
+        
+        
+        {/* All Location Records Tab Content */}
+        {activeTab === 'locations' && (
+          <>
+            <div style={{ 
+              display: 'flex', 
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '20px'
+            }}>
+              <h2 style={{ margin: '0', color: '#333' }}>
+                All Worker Location Records
+              </h2>
+              <button
+                onClick={fetchAllWorkerLocations}
+                disabled={loading}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: '#4BB462',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '5px',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  fontWeight: '500'
+                }}
+              >
+                Refresh Locations
+              </button>
+            </div>
+            
+            {/* Stats summary */}
+            {!loading && workerLocations.length > 0 && (
+              <div style={{ 
+                display: 'flex',
+                gap: '20px',
+                marginBottom: '20px'
+              }}>
+                <div style={{
+                  backgroundColor: 'white',
+                  padding: '15px',
+                  borderRadius: '8px',
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                  textAlign: 'center',
+                  flex: '1'
+                }}>
+                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#673AB7' }}>
+                    {workerLocations.length}
+                  </div>
+                  <div style={{ fontSize: '14px', color: '#666' }}>Total Location Records</div>
+                </div>
+                
+                <div style={{
+                  backgroundColor: 'white',
+                  padding: '15px',
+                  borderRadius: '8px',
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                  textAlign: 'center',
+                  flex: '1'
+                }}>
+                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#4BB462' }}>
+                    {new Set(workerLocations.map(l => l.worker_id)).size}
+                  </div>
+                  <div style={{ fontSize: '14px', color: '#666' }}>Unique Workers</div>
+                </div>
+                
+                <div style={{
+                  backgroundColor: 'white',
+                  padding: '15px',
+                  borderRadius: '8px',
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                  textAlign: 'center'
+                }}>
+                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#2196F3' }}>
+                    {workerLocations.filter(l => 
+                      new Date(l.timestamp) > new Date(Date.now() - 24 * 60 * 60 * 1000)
+                    ).length}
+                  </div>
+                  <div style={{ fontSize: '14px', color: '#666' }}>Last 24 Hours</div>
+                </div>
+              </div>
+            )}
+            
+            {loading ? (
+              <div style={{ textAlign: 'center', padding: '40px 0' }}>
+                <p>Loading location records...</p>
+              </div>
+            ) : (
+              <div style={{ 
+                backgroundColor: 'white',
+                borderRadius: '10px',
+                overflow: 'auto',
+                boxShadow: '0 2px 10px rgba(0, 0, 0, 0.05)',
+                border: '1px solid #e0e0e0',
+                width: '100%'
+              }}>
+                {/* Table Header */}
+                <div style={{ 
+                  display: 'flex',
+                  width: '100%',
+                  padding: '20px',
+                  backgroundColor: '#f8f9fa',
+                  borderBottom: '2px solid #dee2e6',
+                  fontWeight: '700',
+                  color: '#495057',
+                  fontSize: '14px',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px'
+                }}>
+                  <div style={{ flex: '0 0 120px', textAlign: 'center', paddingRight: '15px' }}>Location ID</div>
+                  <div style={{ flex: '0 0 120px', textAlign: 'center', paddingRight: '15px' }}>Worker ID</div>
+                  <div style={{ flex: '0 0 160px', fontFamily: 'Consolas, Monaco, monospace', textAlign: 'center', paddingRight: '15px' }}>Latitude</div>
+                  <div style={{ flex: '0 0 160px', fontFamily: 'Consolas, Monaco, monospace', textAlign: 'center', paddingRight: '15px' }}>Longitude</div>
+                  <div style={{ flex: '1', textAlign: 'center' }}>Timestamp</div>
+                </div>
+                
+                {/* Table Body */}
+                {workerLocations.length > 0 ? (
+                  workerLocations.map((location) => (
+                    <div key={location.location_id} style={{ 
+                      display: 'flex',
+                      width: '100%',
+                      padding: '15px 20px',
+                      borderBottom: '1px solid #eee',
+                      alignItems: 'center'
+                    }}>
+                      <div style={{ 
+                        flex: '0 0 120px',
+                        textAlign: 'center', 
+                        fontWeight: '500',
+                        color: '#555',
+                        paddingRight: '15px'
+                      }}>
+                        {location.location_id}
+                      </div>
+                      <div style={{ 
+                        flex: '0 0 120px',
+                        textAlign: 'center', 
+                        fontWeight: '500',
+                        color: '#673AB7',
+                        paddingRight: '15px'
+                      }}>
+                        {location.worker_id}
+                      </div>
+                      <div style={{ 
+                        flex: '0 0 160px',
+                        fontFamily: 'Consolas, Monaco, monospace', 
+                        fontSize: '13px',
+                        textAlign: 'center',
+                        backgroundColor: '#f1f3f4',
+                        padding: '6px 8px',
+                        borderRadius: '4px',
+                        color: '#1976D2',
+                        marginRight: '15px'
+                      }}>
+                        {parseFloat(location.latitude).toFixed(6)}
+                      </div>
+                      <div style={{ 
+                        flex: '0 0 160px',
+                        fontFamily: 'Consolas, Monaco, monospace', 
+                        fontSize: '13px',
+                        fontFamily: 'Consolas, Monaco, monospace', 
+                        fontSize: '13px',
+                        textAlign: 'center',
+                        backgroundColor: '#f1f3f4',
+                        padding: '6px 8px',
+                        borderRadius: '4px',
+                        color: '#1976D2',
+                        marginRight: '15px'
+                      }}>
+                        {parseFloat(location.longitude).toFixed(6)}
+                      </div>
+                      <div style={{ 
+                        flex: '1',
+                        textAlign: 'center',
+                        fontSize: '13px',
+                        color: '#666',
+                        fontWeight: '500',
+                        lineHeight: '1.4'
+                      }}>
+                        <div style={{ color: '#FF9800', fontWeight: '600', marginBottom: '2px' }}>
+                          {new Date(location.timestamp).toLocaleDateString()}
+                        </div>
+                        <div style={{ color: '#795548', fontSize: '12px' }}>
+                          {new Date(location.timestamp).toLocaleTimeString()}
+                        </div>
+                      </div>
+                    </div>
+                  )) 
+                ) : (
+                  <div style={{
+                    padding: '60px 20px',
+                    textAlign: 'center',
+                    color: '#9e9e9e',
+                    fontSize: '16px',
+                  }}>
+                    No location records found. Click 'Refresh Locations' to try again.
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+      
+      {/* Image Modal */}
+      {selectedImage && (
+        <div style={{ 
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.7)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 1000
+        }} onClick={() => setSelectedImage(null)}>
+          <div style={{
+            maxWidth: '90%',
+            maxHeight: '90%',
+            position: 'relative'
+          }}>
+            <img 
+              src={selectedImage} 
+              alt="Grievance Image" 
+              style={{
+                maxWidth: '100%',
+                maxHeight: '80vh',
+                border: '5px solid white',
+                borderRadius: '5px'
+              }}
+            />
+            <button
+              onClick={() => setSelectedImage(null)}
+              style={{
+                position: 'absolute',
+                top: '-15px',
+                right: '-15px',
+                backgroundColor: 'white',
+                border: 'none',
+                borderRadius: '50%',
+                width: '30px',
+                height: '30px',
+                fontSize: '18px',
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center'
+              }}
+            >
+              &times;
+            </button>
+          </div>
+        </div>
+      )}
+      
+      {/* Assign Modal */}
+      {assignModalOpen && (
+        <div style={{ 
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.7)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            backgroundColor: 'white',
+            borderRadius: '10px',
+            width: '500px',
+            maxWidth: '90%',
+            maxHeight: '80vh',
+            overflow: 'auto',
+            padding: '20px',
+            boxShadow: '0 5px 20px rgba(0, 0, 0, 0.3)',
+            position: 'relative'
+          }}>
+            <h2 style={{ marginTop: 0, color: '#333' }}>Assign Task to Worker</h2>
+            <p style={{ color: '#666' }}>
+              Showing workers sorted by proximity to grievance location
+            </p>
+            
+            {availableWorkers.length > 0 ? (
+              <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                {availableWorkers.map(worker => (
+                  <div 
+                    key={worker.user_id}
+                    style={{
+                      padding: '15px',
+                      borderBottom: '1px solid #eee',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center'
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: '600', fontSize: '16px' }}>{worker.full_name}</div>
+                      <div style={{ color: '#777', fontSize: '14px' }}>Department: {worker.department_name}</div>
+                      <div style={{ display: 'flex', gap: '10px', marginTop: '5px' }}>
+                        {worker.distance !== null ? (
+                          <span style={{ 
+                            backgroundColor: '#e6f7ff', 
+                            color: '#0078d7',
+                            padding: '3px 8px',
+                            borderRadius: '12px',
+                            fontSize: '12px'
+                          }}>
+                            {worker.distance} km away
+                          </span>
+                        ) : (
+                          <span style={{ 
+                            backgroundColor: '#ffe6e6', 
+                            color: '#d70000',
+                            padding: '3px 8px',
+                            borderRadius: '12px',
+                            fontSize: '12px'
+                          }}>
+                            Location unknown
+                          </span>
+                        )}
+                        <span style={{ 
+                          backgroundColor: worker.current_tasks > 0 ? '#fff2e6' : '#e6ffe6',
+                          color: worker.current_tasks > 0 ? '#d77b00' : '#00a651',
+                          padding: '3px 8px',
+                          borderRadius: '12px',
+                          fontSize: '12px'
+                        }}>
+                          {worker.current_tasks} active tasks
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleAssignWorker(worker.user_id)}
+                      style={{
+                        background: '#0078d7',
+                        color: 'white',
+                        border: 'none',
+                        padding: '8px 16px',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontWeight: '600',
+                        fontSize: '14px'
+                      }}
+                    >
+                      Assign
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p style={{ textAlign: 'center', color: '#777' }}>No available workers found</p>
+            )}
+            
+            <div style={{ marginTop: '20px', textAlign: 'right' }}>
+              <button
+                onClick={() => setAssignModalOpen(false)}
+                style={{
+                  background: '#f1f1f1',
+                  color: '#333',
+                  border: 'none',
+                  padding: '8px 16px',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontWeight: '500'
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default AdminDashboard;

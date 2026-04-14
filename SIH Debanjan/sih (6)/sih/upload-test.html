@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upload Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1 {
+            color: #333;
+        }
+        .upload-container {
+            border: 2px dashed #ccc;
+            padding: 20px;
+            text-align: center;
+            margin: 20px 0;
+            cursor: pointer;
+        }
+        .upload-container:hover {
+            border-color: #00ff87;
+        }
+        #image-preview {
+            max-width: 100%;
+            max-height: 300px;
+            margin-top: 20px;
+            display: none;
+        }
+        button {
+            background-color: #00ff87;
+            color: #333;
+            border: none;
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+        button:hover {
+            background-color: #00d96f;
+        }
+        #result {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>Upload Test</h1>
+    <p>Test file uploads to see if the image file is being recognized correctly.</p>
+
+    <div class="upload-container" id="upload-area">
+        <p>Click or drag an image here</p>
+        <input type="file" id="file-input" accept="image/*" style="display: none;">
+    </div>
+
+    <div id="preview-area" style="display: none;">
+        <h3>Selected Image:</h3>
+        <img id="image-preview" src="#" alt="Preview">
+        <p>Filename: <span id="filename"></span></p>
+        <p>File type: <span id="filetype"></span></p>
+        <p>File size: <span id="filesize"></span></p>
+        <button id="upload-button">Upload Image</button>
+    </div>
+
+    <div id="result"></div>
+
+    <script>
+        const uploadArea = document.getElementById('upload-area');
+        const fileInput = document.getElementById('file-input');
+        const previewArea = document.getElementById('preview-area');
+        const imagePreview = document.getElementById('image-preview');
+        const filename = document.getElementById('filename');
+        const filetype = document.getElementById('filetype');
+        const filesize = document.getElementById('filesize');
+        const uploadButton = document.getElementById('upload-button');
+        const resultArea = document.getElementById('result');
+
+        // Handle click on upload area
+        uploadArea.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        // Handle drag and drop
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.style.borderColor = '#00ff87';
+        });
+
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.style.borderColor = '#ccc';
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.style.borderColor = '#ccc';
+            if (e.dataTransfer.files.length) {
+                fileInput.files = e.dataTransfer.files;
+                handleFileSelection();
+            }
+        });
+
+        // Handle file selection
+        fileInput.addEventListener('change', handleFileSelection);
+
+        function handleFileSelection() {
+            if (fileInput.files.length === 0) return;
+
+            const file = fileInput.files[0];
+            
+            // Display file info
+            filename.textContent = file.name;
+            filetype.textContent = file.type;
+            filesize.textContent = formatFileSize(file.size);
+            
+            // Show preview
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                imagePreview.src = e.target.result;
+                imagePreview.style.display = 'block';
+                previewArea.style.display = 'block';
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // Format file size
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' bytes';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+        }
+
+        // Handle upload
+        uploadButton.addEventListener('click', async () => {
+            if (fileInput.files.length === 0) return;
+
+            const file = fileInput.files[0];
+            const formData = new FormData();
+            formData.append('image', file);
+
+            resultArea.style.display = 'block';
+            resultArea.innerHTML = 'Uploading...';
+
+            try {
+                const response = await fetch('http://localhost:5000/api/test-upload/test', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+                resultArea.innerHTML = `<h3>Upload Result:</h3><pre>${JSON.stringify(data, null, 2)}</pre>`;
+            } catch (error) {
+                resultArea.innerHTML = `<h3>Error:</h3><p>${error.message}</p>`;
+            }
+        });
+    </script>
+</body>
+</html>

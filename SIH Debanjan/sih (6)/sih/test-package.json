@@ -1,0 +1,14 @@
+{
+  "name": "upload-test",
+  "version": "1.0.0",
+  "description": "Test script for file uploads",
+  "main": "test-upload.js",
+  "type": "module",
+  "scripts": {
+    "test": "node test-upload.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.7",
+    "form-data": "^4.0.0"
+  }
+}
